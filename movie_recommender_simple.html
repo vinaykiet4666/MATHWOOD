@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Movie Recommender using SVD</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: white;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 { color: gold; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #444; padding: 8px; text-align: center; font-size: 13px; }
+    .given { color: gold; font-weight: bold; }
+    .guess { color: skyblue; }
+    button {
+      padding: 10px 16px;
+      margin: 4px;
+      background: #222;
+      color: white;
+      border: 1px solid #666;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button.active { border-color: gold; color: gold; }
+    #result {
+      margin-top: 20px;
+      padding: 20px;
+      border: 1px solid gold;
+      border-radius: 12px;
+    }
+    #emoji { font-size: 60px; }
+  </style>
+</head>
+<body>
+
+  <h1>Movie Recommender</h1>
+  <p>This page uses SVD to guess the ratings a user has not given yet.</p>
+
+  <h3>Rating table</h3>
+  <div style="overflow-x:auto">
+    <table id="table"></table>
+  </div>
+
+  <h3>Pick a user</h3>
+  <div id="buttons"></div>
+
+  <div id="result">
+    <div id="emoji"></div>
+    <h2 id="title"></h2>
+    <p id="genre"></p>
+    <p>Predicted rating: <b id="rating"></b> / 5</p>
+    <p>Match: <b id="percent"></b>%</p>
+  </div>
+
+<script>
+// ---------- Data ----------
+// 0 means the user has not rated that movie
+
+var movies = [
+  { name: "Baahubali 2", genre: "Epic Action",    emoji: "⚔️" },
+  { name: "Magadheera",  genre: "Fantasy Action", emoji: "🏇" },
+  { name: "RRR",         genre: "Period Action",  emoji: "🔥" },
+  { name: "Sita Ramam",  genre: "Period Romance", emoji: "💌" },
+  { name: "Arjun Reddy", genre: "Romantic Drama", emoji: "🥀" },
+  { name: "Eega",        genre: "Fantasy Comedy", emoji: "🪰" },
+  { name: "Pushpa",      genre: "Crime Action",   emoji: "🌲" },
+  { name: "Ala Vaikunthapurramuloo", genre: "Family Musical", emoji: "🎶" }
+];
+
+var ratings = [
+  [5, 5, 4, 0, 1, 2, 0, 1],
+  [4, 0, 5, 1, 2, 0, 5, 2],
+  [1, 2, 0, 5, 5, 4, 1, 0],
+  [0, 1, 2, 5, 4, 0, 2, 5],
+  [5, 4, 0, 2, 0, 3, 4, 0]
+];
+
+var users = ratings.length;
+var numMovies = ratings[0].length;
+
+
+// ---------- Step 1: fill the blanks ----------
+// SVD can't work with empty cells, so I put the user's average in them
+
+function fillBlanks(matrix) {
+  var filled = [];
+
+  for (var i = 0; i < matrix.length; i++) {
+    var sum = 0;
+    var count = 0;
+
+    for (var j = 0; j < matrix[i].length; j++) {
+      if (matrix[i][j] != 0) {
+        sum = sum + matrix[i][j];
+        count = count + 1;
+      }
+    }
+    var average = sum / count;
+
+    var row = [];
+    for (var j = 0; j < matrix[i].length; j++) {
+      if (matrix[i][j] == 0) {
+        row.push(average);
+      } else {
+        row.push(matrix[i][j]);
+      }
+    }
+    filled.push(row);
+  }
+  return filled;
+}
+
+
+// ---------- Step 2: find the biggest pattern ----------
+// Power iteration: keep multiplying a vector by the matrix again and again.
+// After many times it points in the strongest direction.
+
+function findTopPattern(M) {
+  // start with any vector
+  var v = [];
+  for (var j = 0; j < numMovies; j++) {
+    v.push(1);
+  }
+
+  for (var step = 0; step < 200; step++) {
+    // a = M * v
+    var a = [];
+    for (var i = 0; i < users; i++) {
+      var total = 0;
+      for (var j = 0; j < numMovies; j++) {
+        total = total + M[i][j] * v[j];
+      }
+      a.push(total);
+    }
+
+    // newV = M transpose * a
+    var newV = [];
+    for (var j = 0; j < numMovies; j++) {
+      var total = 0;
+      for (var i = 0; i < users; i++) {
+        total = total + M[i][j] * a[i];
+      }
+      newV.push(total);
+    }
+
+    // make the length of newV equal to 1
+    var length = 0;
+    for (var j = 0; j < numMovies; j++) {
+      length = length + newV[j] * newV[j];
+    }
+    length = Math.sqrt(length);
+
+    for (var j = 0; j < numMovies; j++) {
+      v[j] = newV[j] / length;
+    }
+  }
+
+  // now find sigma and u
+  var Mv = [];
+  for (var i = 0; i < users; i++) {
+    var total = 0;
+    for (var j = 0; j < numMovies; j++) {
+      total = total + M[i][j] * v[j];
+    }
+    Mv.push(total);
+  }
+
+  var sigma = 0;
+  for (var i = 0; i < users; i++) {
+    sigma = sigma + Mv[i] * Mv[i];
+  }
+  sigma = Math.sqrt(sigma);
+
+  var u = [];
+  for (var i = 0; i < users; i++) {
+    u.push(Mv[i] / sigma);
+  }
+
+  return { sigma: sigma, u: u, v: v };
+}
+
+
+// ---------- Step 3: rank 2 prediction ----------
+// Find the top pattern, add it to the answer, remove it from the matrix,
+// then do it one more time. Two patterns = rank 2.
+
+function makePrediction(matrix) {
+  var left = [];       // what is left of the matrix
+  var predicted = [];  // our final guess
+
+  for (var i = 0; i < users; i++) {
+    left.push(matrix[i].slice());
+    predicted.push([]);
+    for (var j = 0; j < numMovies; j++) {
+      predicted[i].push(0);
+    }
+  }
+
+  for (var round = 0; round < 2; round++) {
+    var p = findTopPattern(left);
+
+    for (var i = 0; i < users; i++) {
+      for (var j = 0; j < numMovies; j++) {
+        var piece = p.sigma * p.u[i] * p.v[j];
+        predicted[i][j] = predicted[i][j] + piece;
+        left[i][j] = left[i][j] - piece;
+      }
+    }
+  }
+  return predicted;
+}
+
+
+// ---------- Run it ----------
+
+var filled = fillBlanks(ratings);
+var predicted = makePrediction(filled);
+
+// keep a rating between 1 and 5
+function limit(x) {
+  if (x < 1) return 1;
+  if (x > 5) return 5;
+  return x;
+}
+
+// best movie = highest predicted rating among movies the user has NOT rated
+function recommend(user) {
+  var bestMovie = -1;
+  var bestScore = -100;
+
+  for (var j = 0; j < numMovies; j++) {
+    if (ratings[user][j] == 0 && predicted[user][j] > bestScore) {
+      bestScore = predicted[user][j];
+      bestMovie = j;
+    }
+  }
+  return { movie: bestMovie, score: limit(bestScore) };
+}
+
+
+// ---------- Show on the page ----------
+
+function showTable() {
+  var html = "<tr><th>User</th>";
+  for (var j = 0; j < numMovies; j++) {
+    html = html + "<th>" + movies[j].name + "</th>";
+  }
+  html = html + "</tr>";
+
+  for (var i = 0; i < users; i++) {
+    html = html + "<tr><th>User " + (i + 1) + "</th>";
+    for (var j = 0; j < numMovies; j++) {
+      if (ratings[i][j] != 0) {
+        html = html + "<td class='given'>" + ratings[i][j] + "</td>";
+      } else {
+        html = html + "<td class='guess'>" + limit(predicted[i][j]).toFixed(1) + "</td>";
+      }
+    }
+    html = html + "</tr>";
+  }
+  document.getElementById("table").innerHTML = html;
+}
+
+function showUser(user) {
+  var r = recommend(user);
+  var movie = movies[r.movie];
+
+  document.getElementById("emoji").textContent = movie.emoji;
+  document.getElementById("title").textContent = movie.name;
+  document.getElementById("genre").textContent = movie.genre;
+  document.getElementById("rating").textContent = r.score.toFixed(1);
+  document.getElementById("percent").textContent = Math.round(r.score / 5 * 100);
+
+  // highlight the chosen button
+  var allButtons = document.querySelectorAll("#buttons button");
+  for (var i = 0; i < allButtons.length; i++) {
+    allButtons[i].className = (i == user) ? "active" : "";
+  }
+}
+
+function makeButtons() {
+  var box = document.getElementById("buttons");
+  for (var i = 0; i < users; i++) {
+    var b = document.createElement("button");
+    b.textContent = "User " + (i + 1);
+    b.onclick = (function (n) {
+      return function () { showUser(n); };
+    })(i);
+    box.appendChild(b);
+  }
+}
+
+showTable();
+makeButtons();
+showUser(0);
+</script>
+
+</body>
+</html>
